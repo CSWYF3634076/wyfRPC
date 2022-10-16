@@ -36,7 +36,7 @@ var DefaultServer = NewServer()
 
 // Accept accepts connections on the listener and serves requests
 // for each incoming connection.
-func (server Server) Accept(listener net.Listener) {
+func (server *Server) Accept(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -52,7 +52,7 @@ func Accept(listener net.Listener) {
 
 // ServerConn runs the server on a single connection.
 // ServerConn blocks, serving the connection until the client hangs up.
-func (server Server) ServerConn(conn io.ReadWriteCloser) {
+func (server *Server) ServerConn(conn io.ReadWriteCloser) {
 	defer func() {
 		_ = conn.Close()
 	}()
@@ -76,7 +76,7 @@ func (server Server) ServerConn(conn io.ReadWriteCloser) {
 // invalidRequest is a placeholder for response argv when error occurs
 var invalidRequest = struct{}{}
 
-func (server Server) serverCodec(cc codec.Codec) {
+func (server *Server) serverCodec(cc codec.Codec) {
 	sending := new(sync.Mutex) //  make sure to send a complete response
 	wg := new(sync.WaitGroup)  // wait until all request are handled
 	for {
@@ -103,7 +103,7 @@ type request struct {
 	replyv reflect.Value // replyv of request
 }
 
-func (server Server) readRequest(cc codec.Codec) (*request, error) {
+func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	h, err := server.readRequestHeader(cc)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (server Server) readRequest(cc codec.Codec) (*request, error) {
 	return req, nil
 }
 
-func (server Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
+func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	var h codec.Header
 	if err := cc.ReadHeader(&h); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -129,7 +129,7 @@ func (server Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	return &h, nil
 }
 
-func (server Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Println("server:", req.h, req.argv.Elem())
 
@@ -139,7 +139,7 @@ func (server Server) handleRequest(cc codec.Codec, req *request, sending *sync.M
 	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
 }
 
-func (server Server) sendResponse(cc codec.Codec, h *codec.Header, body any, sending *sync.Mutex) {
+func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body any, sending *sync.Mutex) {
 	sending.Lock()
 	defer sending.Unlock()
 	if err := cc.Write(h, body); err != nil {
