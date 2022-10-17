@@ -2,11 +2,13 @@ package wyfrpc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"wyfRPC/codec/codec"
 )
@@ -24,7 +26,9 @@ var DefaultOption = &Option{
 }
 
 // Server represents an RPC Server.
-type Server struct{}
+type Server struct {
+	serviceMap sync.Map
+}
 
 // NewServer returns a new Server.
 func NewServer() *Server {
@@ -101,6 +105,8 @@ type request struct {
 	h      *codec.Header // header of request
 	argv   reflect.Value // argv of request
 	replyv reflect.Value // replyv of request
+	mtype  *methodType
+	svc    *service
 }
 
 func (server *Server) readRequest(cc codec.Codec) (*request, error) {
@@ -110,10 +116,21 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	}
 	req := &request{h: h}
 	// TODO: now we don't know the type of request argv
-	// day 1, just suppose it's string
-	req.argv = reflect.New(reflect.TypeOf(""))               // 初始化参数为空
-	if err = cc.ReadBody(req.argv.Interface()); err != nil { // 将数据写入从cc中读取body信息到req的argv中
+	req.svc, req.mtype, err = server.findService(h.ServiceMethod)
+	if err != nil {
+		return req, err
+	}
+	req.argv = req.mtype.newArgv()
+	req.replyv = req.mtype.newReplyv()
+
+	// make sure that argvi is a pointer, ReadBody need a pointer as parameter
+	argvi := req.argv.Interface()
+	if req.argv.Type().Kind() != reflect.Pointer {
+		argvi = req.argv.Addr().Interface()
+	}
+	if err = cc.ReadBody(argvi); err != nil { // 将数据写入从cc中读取body信息到req的argv中
 		log.Println("rpc server: read argv err:", err)
+		return req, err
 	}
 	return req, nil
 }
@@ -145,4 +162,42 @@ func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body any, se
 	if err := cc.Write(h, body); err != nil {
 		log.Println("rpc server: write response error:", err)
 	}
+}
+
+func (server Server) Register(rcvr any) error {
+	s := newService(rcvr)
+	if _, dup := server.serviceMap.LoadOrStore(s.typName, s); dup {
+		return errors.New("rpc: service already defined: " + s.typName)
+	}
+	return nil
+}
+
+func Register(rcvr any) error {
+	return DefaultServer.Register(rcvr)
+}
+
+/*
+因为 ServiceMethod 的构成是 “Service.Method”，
+因此先将其分割成 2 部分，第一部分是 Service 的名称，
+第二部分即方法名。现在 serviceMap 中找到对应的 service 实例，
+再从 service 实例的 method 中，找到对应的 methodType。
+*/
+func (server *Server) findService(serviceMethod string) (svc *service, mtype *methodType, err error) {
+	dot := strings.LastIndex(serviceMethod, ",")
+	if dot < 0 {
+		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
+		return
+	}
+	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
+	svci, ok := server.serviceMap.Load(serviceName)
+	if !ok {
+		err = errors.New("rpc server: can't find service " + serviceName)
+		return
+	}
+	svc = svci.(*service)
+	mtype = svc.method[methodName]
+	if mtype == nil {
+		err = errors.New("rpc server: can't find method " + methodName)
+	}
+	return
 }
