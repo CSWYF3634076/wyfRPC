@@ -3,7 +3,6 @@ package wyfrpc
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -110,12 +109,14 @@ type request struct {
 }
 
 func (server *Server) readRequest(cc codec.Codec) (*request, error) {
+
 	h, err := server.readRequestHeader(cc)
+	log.Println("readRequest中的cc:", cc, " header:", h)
 	if err != nil {
 		return nil, err
 	}
 	req := &request{h: h}
-	// TODO: now we don't know the type of request argv
+	log.Println("readRequest中的h.ServiceMethod:", h.ServiceMethod)
 	req.svc, req.mtype, err = server.findService(h.ServiceMethod)
 	if err != nil {
 		return req, err
@@ -126,9 +127,10 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	// make sure that argvi is a pointer, ReadBody need a pointer as parameter
 	argvi := req.argv.Interface()
 	if req.argv.Type().Kind() != reflect.Pointer {
+		// 指针的话使用地址进行赋值
 		argvi = req.argv.Addr().Interface()
 	}
-	if err = cc.ReadBody(argvi); err != nil { // 将数据写入从cc中读取body信息到req的argv中
+	if err = cc.ReadBody(argvi); err != nil { // 将数据从cc中读取body信息到req的argv中
 		log.Println("rpc server: read argv err:", err)
 		return req, err
 	}
@@ -149,9 +151,14 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Println("server:", req.h, req.argv.Elem())
-
-	// 具体的业务逻辑，对接收到的参数如何处理
-	req.replyv = reflect.ValueOf(fmt.Sprintf("wyfrpc resp %d", req.h.Seq))
+	err := req.svc.call(req.mtype, req.argv, req.replyv)
+	if err != nil {
+		req.h.Error = err.Error()
+		server.sendResponse(cc, req.h, invalidRequest, sending)
+		return
+	}
+	// day 1 具体的业务逻辑，对接收到的参数如何处理
+	// req.replyv = reflect.ValueOf(fmt.Sprintf("wyfrpc resp %d", req.h.Seq))
 
 	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
 }
@@ -164,6 +171,7 @@ func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body any, se
 	}
 }
 
+// Register 当前类型注册到 server 的 serviceMap 中
 func (server Server) Register(rcvr any) error {
 	s := newService(rcvr)
 	if _, dup := server.serviceMap.LoadOrStore(s.typName, s); dup {
@@ -172,6 +180,7 @@ func (server Server) Register(rcvr any) error {
 	return nil
 }
 
+// Register publishes the receiver's methods in the DefaultServer.
 func Register(rcvr any) error {
 	return DefaultServer.Register(rcvr)
 }
@@ -183,7 +192,7 @@ func Register(rcvr any) error {
 再从 service 实例的 method 中，找到对应的 methodType。
 */
 func (server *Server) findService(serviceMethod string) (svc *service, mtype *methodType, err error) {
-	dot := strings.LastIndex(serviceMethod, ",")
+	dot := strings.LastIndex(serviceMethod, ".")
 	if dot < 0 {
 		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
 		return

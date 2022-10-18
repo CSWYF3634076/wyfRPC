@@ -47,6 +47,7 @@ func (m *methodType) NumCalls() uint64 {
 
 //  2 个方法 newArgv 和 newReplyv，用于创建对应类型的实例。
 // newArgv 方法有一个小细节，指针类型和值类型创建实例的方式有细微区别。
+// 主要将 reflect.Type 转为 reflect.Value
 func (m *methodType) newArgv() reflect.Value {
 	var argv reflect.Value
 	// arg may be a pointer type, or a value type
@@ -88,8 +89,8 @@ type service struct {
 func newService(rcvr any) *service {
 	s := new(service)
 	s.rcvr = reflect.ValueOf(rcvr)
-	s.typName = reflect.Indirect(s.rcvr).Type().Name()
 	s.typ = reflect.TypeOf(rcvr)
+	s.typName = reflect.Indirect(s.rcvr).Type().Name()
 	if !ast.IsExported(s.typName) {
 		log.Fatalf("rpc server: %s is not a valid service name", s.typName)
 	}
@@ -106,6 +107,7 @@ registerMethods 过滤出了符合条件的方法：
 func (s *service) registerMethods() {
 	s.method = make(map[string]*methodType)
 	for i := 0; i < s.typ.NumMethod(); i++ {
+		// 要从反射的type里遍历Method
 		method := s.typ.Method(i)
 		mType := method.Type
 		if mType.NumIn() != 3 || mType.NumOut() != 1 {
@@ -114,6 +116,8 @@ func (s *service) registerMethods() {
 		if mType.Out(0) != reflect.TypeOf((*error)(nil)).Elem() {
 			continue
 		}
+		// 方法的 参数0 是方法名 ，索引 1 是参数，索引 2 是返回值 ；和具体要注册的函数有关
+		// 参考main.go中的 Foo的Sum函数
 		argType, replyType := mType.In(1), mType.In(2)
 		if !isExportedOrBuiltinType(argType) || !isExportedOrBuiltinType(replyType) {
 			continue

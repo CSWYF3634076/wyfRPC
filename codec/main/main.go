@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -9,7 +8,24 @@ import (
 	wyfrpc "wyfRPC/codec"
 )
 
+type Foo int
+
+type Args struct {
+	Num1, Num2 int
+}
+
+func (f Foo) Sum(args Args, reply *int) error {
+	*reply = args.Num1 + args.Num2
+	return nil
+}
+
 func startServer(addr chan string) {
+	// 注册 Foo 到 Server 中，并启动 RPC 服务
+	var foo Foo
+	if err := wyfrpc.Register(&foo); err != nil {
+		log.Fatal("register error:", err)
+	}
+
 	// pick a free port
 	listener, err := net.Listen("tcp", ":1234")
 	if err != nil {
@@ -56,19 +72,19 @@ func main() {
 	client, _ := wyfrpc.Dial("tcp", <-addr)
 	defer func() { _ = client.Close() }()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	// send request & receive response
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			args := fmt.Sprintf("wyfrpc req args %d", i)
-			var reply string
+			args := &Args{Num1: i, Num2: i * i}
+			var reply int
 			if err := client.Call("Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
-			log.Println("reply :", reply)
+			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
 		}(i)
 	}
 	wg.Wait()
