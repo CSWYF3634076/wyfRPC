@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 	"sync"
@@ -69,10 +70,13 @@ func main() {
 	*/
 
 	// day2 高性能client
-	client, _ := wyfrpc.Dial("tcp", <-addr)
+	client, _ := wyfrpc.Dial("tcp", <-addr, &wyfrpc.Option{
+		ConnectTimeout: 10 * time.Second,
+		HandleTimeout:  10 * time.Second,
+	})
 	defer func() { _ = client.Close() }()
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 	// send request & receive response
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
@@ -80,8 +84,12 @@ func main() {
 		go func(i int) {
 			defer wg.Done()
 			args := &Args{Num1: i, Num2: i * i}
+			ctx, _ := context.WithTimeout(context.Background(), time.Second)
 			var reply int
-			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			//if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			//	log.Fatal("call Foo.Sum error:", err)
+			//}
+			if err := client.CallTimeout(ctx, "Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
 			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
