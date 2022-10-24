@@ -260,7 +260,7 @@ func (client *Client) CallTimeout(ctx context.Context, serviceMethod string, arg
 	case <-ctx.Done():
 		client.removeCall(call.Seq)
 		return errors.New("rpc client: call failed: " + ctx.Err().Error())
-	case call = <-call.Done:
+	case call := <-call.Done:
 		return call.Error // 这个Error不一定有，可能是空
 	}
 }
@@ -274,8 +274,8 @@ type clientResult struct {
 
 type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
 
-// DialTimeout 连接server ，第一个参数是 NewClient 函数
-func DialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
+// dialTimeout 连接server ，第一个参数是 NewClient 函数 ，可传入不同的 f 模拟不同的NewClient，不对外开放
+func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
@@ -291,12 +291,20 @@ func DialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 		}
 	}()
 	ch := make(chan clientResult)
+	finish := make(chan struct{}) // 用于关闭下面的协程
+	defer close(finish)
 	go func() {
-		client, err = f(conn, opt)
-		ch <- clientResult{
+		client, err := f(conn, opt)
+		select {
+		case <-finish:
+			close(ch)
+			return
+		case ch <- clientResult{
 			client: client,
 			err:    err,
+		}:
 		}
+
 	}()
 	if opt.ConnectTimeout == 0 {
 		result := <-ch
@@ -309,4 +317,9 @@ func DialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 		return result.client, result.err
 	}
 
+}
+
+// DialTimeout 连接server ，封装了超时内容
+func DialTimeout(network, address string, opts ...*Option) (client *Client, err error) {
+	return dialTimeout(NewClient, network, address, opts...)
 }

@@ -65,6 +65,7 @@ func (server *Server) ServerConn(conn io.ReadWriteCloser) {
 		_ = conn.Close()
 	}()
 	var opt Option
+	// TODO 这里 HandleTimeout 超时是客户端指定的，感觉不太正常
 	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
 		log.Println("rpc server: options error: ", err)
 		return
@@ -157,19 +158,30 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 	log.Println("server:", req.h, req.argv)
 	called := make(chan struct{}) // 是否已经调用 “注册的服务”
 	sent := make(chan struct{})   // 是否已经发送 Response
+	finish := make(chan struct{}) // 用于关闭下面的协程
+	defer close(finish)
 	go func() {
 		err := req.svc.call(req.mtype, req.argv, req.replyv)
-		called <- struct{}{}
-		if err != nil {
-			req.h.Error = err.Error()
-			server.sendResponse(cc, req.h, invalidRequest, sending)
-			sent <- struct{}{}
+		select {
+		case <-finish:
+			close(called)
+			close(sent)
+			// 这里不用发送回复，因为在下面的 time.After后会发送
 			return
+		case called <- struct{}{}:
+			if err != nil {
+				req.h.Error = err.Error()
+				server.sendResponse(cc, req.h, invalidRequest, sending)
+				sent <- struct{}{}
+				return
+			}
+			// day 1 具体的业务逻辑，对接收到的参数如何处理
+			// req.replyv = reflect.ValueOf(fmt.Sprintf("wyfrpc resp %d", req.h.Seq))
+			// 正常情况 ，将rpc调用结果发送到客户端
+			server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+			sent <- struct{}{}
 		}
-		// day 1 具体的业务逻辑，对接收到的参数如何处理
-		// req.replyv = reflect.ValueOf(fmt.Sprintf("wyfrpc resp %d", req.h.Seq))
-		server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
-		sent <- struct{}{}
+
 	}()
 	if timeout == 0 {
 		<-called

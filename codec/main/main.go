@@ -16,6 +16,7 @@ type Args struct {
 }
 
 func (f Foo) Sum(args Args, reply *int) error {
+	time.Sleep(2 * time.Second)
 	*reply = args.Num1 + args.Num2
 	return nil
 }
@@ -70,9 +71,8 @@ func main() {
 	*/
 
 	// day2 高性能client
-	client, _ := wyfrpc.Dial("tcp", <-addr, &wyfrpc.Option{
-		ConnectTimeout: 10 * time.Second,
-		HandleTimeout:  10 * time.Second,
+	client, _ := wyfrpc.DialTimeout("tcp", <-addr, &wyfrpc.Option{
+		HandleTimeout: 1 * time.Second,
 	})
 	defer func() { _ = client.Close() }()
 
@@ -84,7 +84,7 @@ func main() {
 		go func(i int) {
 			defer wg.Done()
 			args := &Args{Num1: i, Num2: i * i}
-			ctx, _ := context.WithTimeout(context.Background(), time.Second)
+			ctx, _ := context.WithTimeout(context.Background(), 3*time.Second)
 			var reply int
 			//if err := client.Call("Foo.Sum", args, &reply); err != nil {
 			//	log.Fatal("call Foo.Sum error:", err)
