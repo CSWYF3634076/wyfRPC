@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -51,16 +52,16 @@ func (server *Server) Accept(listener net.Listener) {
 			log.Println("rpc server: accept error:", err)
 			return
 		}
-		go server.ServerConn(conn)
+		go server.ServeConn(conn)
 	}
 }
 func Accept(listener net.Listener) {
 	DefaultServer.Accept(listener)
 }
 
-// ServerConn runs the server on a single connection.
-// ServerConn blocks, serving the connection until the client hangs up.
-func (server *Server) ServerConn(conn io.ReadWriteCloser) {
+// ServeConn runs the server on a single connection.
+// ServeConn blocks, serving the connection until the client hangs up.
+func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 	defer func() {
 		_ = conn.Close()
 	}()
@@ -243,4 +244,55 @@ func (server *Server) findService(serviceMethod string) (svc *service, mtype *me
 		err = errors.New("rpc server: can't find method " + methodName)
 	}
 	return
+}
+
+// 支持 Http 协议
+const (
+	connected        = "200 Connected to wyf RPC"
+	defaultRPCPath   = "/wyfrpc"
+	defaultDebugPath = "/debug/wyfrpc"
+)
+
+// ServeHTTP implements an http.Handler that answers RPC requests.
+// ServeHTTP 一般都是作为http请求的handler函数
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		// 下面两种写法都行
+		w.Write([]byte("405 must CONNECT\n"))
+		// _, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	// WebSocket实现为例。其会在握手阶段将http.ResponseWriter断言为http.Hijacker接口并调用其中的Hijack()方法，拿到原始tcp链接对象并进行接管。
+	// 而在使用HTTP/2时，http.ResponseWriter无法断言为http.Hijacker
+	// HttpServer提供了一个Hijacker的接口可以让开发者来接管连接状态的管理，
+	// 如果一个连接被Hijack了，那么连接的关闭需要由开发者自己管理
+	// 我们使用Hijacker后，服务端返回的内容已经不符合http协议了，
+	// 其只包含body的内容，并没有http协议行和协议头部分。
+	// Hijack()可以将HTTP对应的TCP连接取出，连接在Hijack()之后，HTTP的相关操作就会受到影响，调用方需要负责去关闭连接。
+	conn, _, err := w.(http.Hijacker).Hijack()
+	defer conn.Close()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0"+connected+"\n\n")
+	server.ServeConn(conn)
+}
+
+// HandleHTTP registers an HTTP handler for RPC messages on rpcPath.
+// It is still necessary to invoke http.Serve(), typically in a go statement.
+func (server *Server) HandleHTTP() {
+
+	// 注册路由
+	// 这里传入 server ， 因为 server 实现了 ServeHTTP 方法
+	http.Handle(defaultRPCPath, server)
+	http.Handle(defaultDebugPath, debugHTTP{server})
+	log.Println("rpc server debug path:", defaultDebugPath)
+}
+
+// HandleHTTP is a convenient approach for default server to register HTTP handlers
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }

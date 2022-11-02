@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 	wyfrpc "wyfRPC/codec"
@@ -16,7 +17,6 @@ type Args struct {
 }
 
 func (f Foo) Sum(args Args, reply *int) error {
-	time.Sleep(2 * time.Second)
 	*reply = args.Num1 + args.Num2
 	return nil
 }
@@ -36,6 +36,23 @@ func startServer(addr chan string) {
 	log.Println("start rpc server on", listener.Addr())
 	addr <- listener.Addr().String()
 	wyfrpc.Accept(listener)
+}
+
+func startDebugServer(addr chan string) {
+	// 注册 Foo 到 Server 中，并启动 RPC 服务
+	var foo Foo
+	if err := wyfrpc.Register(&foo); err != nil {
+		log.Fatal("register debug error:", err)
+	}
+	// pick a free port
+	listener, err := net.Listen("tcp", ":1235")
+	if err != nil {
+		log.Fatal("network error:", err)
+	}
+	wyfrpc.HandleHTTP()
+	log.Println("start debug rpc server on", listener.Addr())
+	addr <- listener.Addr().String()
+	http.Serve(listener, nil)
 }
 
 func main() {
@@ -70,6 +87,40 @@ func main() {
 			}
 	*/
 
+}
+
+// 将 rpc client 引入 http
+func httpRpcCall(addr chan string) {
+	// day2 高性能client
+	client, _ := wyfrpc.DialHTTP("tcp", <-addr, &wyfrpc.Option{
+		HandleTimeout: 1 * time.Second,
+	})
+	defer func() { _ = client.Close() }()
+
+	time.Sleep(1 * time.Second)
+	// send request & receive response
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			args := &Args{Num1: i, Num2: i * i}
+			ctx, _ := context.WithTimeout(context.Background(), 3*time.Second)
+			var reply int
+			//if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			//	log.Fatal("call Foo.Sum error:", err)
+			//}
+			if err := client.CallTimeout(ctx, "Foo.Sum", args, &reply); err != nil {
+				log.Fatal("call Foo.Sum error:", err)
+			}
+			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// 开始的 rpc client ， 包括超时机制
+func rpcCall(addr chan string) {
 	// day2 高性能client
 	client, _ := wyfrpc.DialTimeout("tcp", <-addr, &wyfrpc.Option{
 		HandleTimeout: 1 * time.Second,
@@ -96,5 +147,4 @@ func main() {
 		}(i)
 	}
 	wg.Wait()
-
 }

@@ -3,6 +3,8 @@ package wyfrpc
 import (
 	"context"
 	"net"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -73,4 +75,26 @@ func TestClient_Call(t *testing.T) {
 		_assert(err != nil && strings.Contains(err.Error(), "handle timeout"), "expect a timeout error")
 
 	})
+}
+
+// 这个测试用例使用了 unix 协议创建 socket 连接，适用于本机内部的通信，使用上与 TCP 协议并无区别
+func TestXDial(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		ch := make(chan struct{})
+		addr := "/tmp/wyfrpc.sock"
+		go func() {
+			_ = os.Remove(addr) // 先删除一下文件，防止文件存在
+			listener, err := net.Listen("unix", addr)
+			if err != nil {
+				t.Fatal("failed to listen unix socket")
+			}
+			ch <- struct{}{}
+			Accept(listener) // Accept 并行处理
+		}()
+
+		<-ch
+
+		_, err := XDial("unix@" + addr)
+		_assert(err == nil, "failed to connect unix socket")
+	}
 }
