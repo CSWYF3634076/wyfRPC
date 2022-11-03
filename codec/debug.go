@@ -8,7 +8,7 @@ import (
 
 const debugText = `<html>
 	<body>
-	<title>GeeRPC Services</title>
+	<title>wyfRPC Services</title>
 	{{range .}}
 	<hr>
 	Service {{.Name}}

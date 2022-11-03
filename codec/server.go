@@ -260,8 +260,8 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		// 下面两种写法都行
-		w.Write([]byte("405 must CONNECT\n"))
-		// _, _ = io.WriteString(w, "405 must CONNECT\n")
+		//w.Write([]byte("405 must CONNECT\n"))
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
 		return
 	}
 	// WebSocket实现为例。其会在握手阶段将http.ResponseWriter断言为http.Hijacker接口并调用其中的Hijack()方法，拿到原始tcp链接对象并进行接管。
@@ -272,12 +272,12 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 其只包含body的内容，并没有http协议行和协议头部分。
 	// Hijack()可以将HTTP对应的TCP连接取出，连接在Hijack()之后，HTTP的相关操作就会受到影响，调用方需要负责去关闭连接。
 	conn, _, err := w.(http.Hijacker).Hijack()
-	defer conn.Close()
+	//defer conn.Close()
 	if err != nil {
 		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
 		return
 	}
-	_, _ = io.WriteString(conn, "HTTP/1.0"+connected+"\n\n")
+	_, _ = io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
 	server.ServeConn(conn)
 }
 

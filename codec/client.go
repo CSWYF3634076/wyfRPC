@@ -297,7 +297,7 @@ func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 	finish := make(chan struct{}) // 用于关闭下面的协程
 	defer close(finish)
 	go func() {
-		client, err := f(conn, opt)
+		client, err := f(conn, opt) // 调用 NewClient
 		select {
 		case <-finish:
 			close(ch)

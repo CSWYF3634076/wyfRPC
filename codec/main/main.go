@@ -41,24 +41,30 @@ func startServer(addr chan string) {
 func startDebugServer(addr chan string) {
 	// 注册 Foo 到 Server 中，并启动 RPC 服务
 	var foo Foo
-	if err := wyfrpc.Register(&foo); err != nil {
-		log.Fatal("register debug error:", err)
-	}
+
 	// pick a free port
 	listener, err := net.Listen("tcp", ":1235")
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
+	if err := wyfrpc.Register(&foo); err != nil {
+		log.Fatal("register debug error:", err)
+	}
 	wyfrpc.HandleHTTP()
 	log.Println("start debug rpc server on", listener.Addr())
 	addr <- listener.Addr().String()
-	http.Serve(listener, nil)
+	if err := http.Serve(listener, nil); err != nil {
+		log.Fatal("http.Serve error:", err)
+	}
 }
 
 func main() {
 	log.SetFlags(0)
 	addr := make(chan string)
-	go startServer(addr)
+	//go startServer(addr)
+
+	go httpRpcCall(addr)   // http 客户端
+	startDebugServer(addr) // http 服务端
 
 	/*
 		day 1 client
@@ -91,12 +97,13 @@ func main() {
 
 // 将 rpc client 引入 http
 func httpRpcCall(addr chan string) {
-	// day2 高性能client
-	client, _ := wyfrpc.DialHTTP("tcp", <-addr, &wyfrpc.Option{
-		HandleTimeout: 1 * time.Second,
-	})
-	defer func() { _ = client.Close() }()
 
+	time.Sleep(2 * time.Second)
+	client, err := wyfrpc.DialHTTP("tcp", <-addr)
+	defer func() { _ = client.Close() }()
+	if err != nil {
+		log.Fatal("wyfrpc.DialHTTP error:", err)
+	}
 	time.Sleep(1 * time.Second)
 	// send request & receive response
 	var wg sync.WaitGroup
@@ -105,12 +112,8 @@ func httpRpcCall(addr chan string) {
 		go func(i int) {
 			defer wg.Done()
 			args := &Args{Num1: i, Num2: i * i}
-			ctx, _ := context.WithTimeout(context.Background(), 3*time.Second)
 			var reply int
-			//if err := client.Call("Foo.Sum", args, &reply); err != nil {
-			//	log.Fatal("call Foo.Sum error:", err)
-			//}
-			if err := client.CallTimeout(ctx, "Foo.Sum", args, &reply); err != nil {
+			if err := client.CallTimeout(context.Background(), "Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
 			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
